@@ -1,0 +1,32 @@
+
+main {
+    min-height: 50vh;
+}
+body {
+    background: #f1f1f1;
+}
+h2, h1 {
+    text-align: center;
+}
+footer {
+    background: rgb(231, 231, 231);
+}
+.my-4 {
+    margin-bottom: 0 !important;
+}
+
+.custom-form {
+    background-color: white;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.custom-form label {
+    font-weight: bold;
+}
+.form-control:focus, .input-group:focus-within {
+    outline: none;
+    box-shadow: none;
+}

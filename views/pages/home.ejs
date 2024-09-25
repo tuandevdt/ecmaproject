@@ -1,0 +1,121 @@
+<%- include('../layout/header') %>
+    <main>
+
+        <div class="container mt-4">
+            <h1>Tra cứu thông tin</h1>
+            <form id="uploadForm" action="/upload" method="POST" class="p-4 border rounded shadow-sm custom-form">
+                <div class="mb-3">
+                    <label for="formFile" class="form-label">Tải lên danh sách giao dịch</label>
+                    <input class="form-control" type="file" accept=".csv" name="csvFile" id="formFile" required>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-3">
+                    <button type="submit" class="btn btn-outline-success">Tải lên</button>
+                    <div id="message" class="text-muted"></div>
+                </div>
+            </form>
+            
+            <form action="" class="p-4 border rounded shadow-sm custom-form mt-4">
+                <div class="row mb-4">
+                    <div class="col-md-4">
+                        <label for="startDate">Từ ngày:</label>
+                        <input type="date" id="startDate" class="form-control">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="endDate">Đến ngày:</label>
+                        <input type="date" id="endDate" class="form-control">
+                    </div>
+                    <div class="col-md-4">
+                        <label for="transactionAmount">Số tiền:</label>
+                        <div class="input-group">
+                            <input type="number" id="minAmount" class="form-control" placeholder="Từ">
+                            <span class="input-group-text">đến</span>
+                            <input type="number" id="maxAmount" class="form-control" placeholder="Đến">
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label for="transactionDetail">Nội dung chuyển khoản:</label>
+                    <input type="text" id="transactionDetail" class="form-control" placeholder="Nhập nội dung...">
+                </div>
+                <button class="btn btn-outline-secondary" id="filterButton">Lọc</button>
+            </form>
+            <h2 class="mt-4">Danh sách giao dịch</h2>
+            <table class="table table-bordered">
+                <thead class="bg-primary text-white">
+                    <tr class="table-dark">
+                        <th class="fw-bold">STT</th>
+                        <th class="fw-bold">Ngày</th>
+                        <th class="fw-bold">Số tiền</th>
+                        <th class="fw-bold">Nội dung</th>
+                    </tr>
+                </thead>
+                <tbody id="transactionTableBody">
+                    <% if (data && data.length > 0) { %>
+                        <% data.forEach((item, index) => { %>
+                            <tr class="">
+                                <td><%= item.id %></td>
+                                <td><%= formatDateTime(item.date_time) %></td>
+                                <td><%= formatCurrency(item.credit) %></td>
+                                <td><%= item.detail %></td>
+                            </tr>
+                        <% }) %>
+                    <% } else { %>
+                        <tr>
+                            <td colspan="4" class="text-center">Không có dữ liệu nào để hiển thị.</td>
+                        </tr>
+                    <% } %>
+                </tbody>
+            </table>
+            <nav>
+                <ul class="pagination justify-content-center">
+                    <li class="page-item <%= currentPage === 1 ? 'disabled' : '' %>">
+                        <a class="page-link" href="/?page=<%= currentPage - 1 %>">Previous</a>
+                    </li>
+                    
+                    <% if (currentPage < totalPages) { %>
+                        <li class="page-item">
+                            <a class="page-link" href="/?page=<%= currentPage + 1 %>">Next</a>
+                        </li>
+                    <% } %>
+                </ul>
+            </nav>
+            
+            
+            
+            
+            
+            
+        </div>
+    </main>
+    <%- include('../layout/footer') %>
+        <script>
+            document.getElementById('uploadForm').onsubmit = async (e) => {
+                e.preventDefault();
+
+                const fileInput = document.getElementById('formFile');
+                const formData = new FormData();
+                formData.append('csvFile', fileInput.files[0]);
+
+                const messageDiv = document.getElementById('message');
+                messageDiv.innerText = "Đang tải lên..."; 
+
+                const startTime = Date.now();
+
+                try {
+                    const response = await fetch('/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const message = await response.text();
+                    const endTime = Date.now();
+                    const timeTaken = ((endTime - startTime) / 1000).toFixed(2); 
+
+                    messageDiv.innerHTML = `${message} Thời gian đã mất: ${timeTaken} giây. <a href="/" class="btn btn-dark">Hiển thị dữ liệu</a>`; // Hiển thị thông báo thành công và thời gian
+                } catch (error) {
+                    messageDiv.innerText = `Có lỗi xảy ra: ${error.message}`; 
+                }
+            };
+
+ 
+        </script>
