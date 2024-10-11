@@ -21,18 +21,11 @@ db.connect((err) => {
   console.log("Kết nối đến cơ sở dữ liệu thành công.");
 });
 
-app.use(
-  "/bootstrap/css",
-  express.static(path.join(__dirname, "node_modules/bootstrap/dist/css"))
-);
-app.use(
-  "/bootstrap/js",
-  express.static(path.join(__dirname, "node_modules/bootstrap/dist/js"))
-);
-
+app.use(express.urlencoded({ extended: true }));
+app.use("/bootstrap/css", express.static(path.join(__dirname, "node_modules/bootstrap/dist/css")));
+app.use("/bootstrap/js", express.static(path.join(__dirname, "node_modules/bootstrap/dist/js")));
 app.set("view engine", "ejs");
 app.set("views", "./views");
-
 app.use(express.static("public"));
 
 function formatDateTime(dateTime) {
@@ -47,52 +40,139 @@ function formatDateTime(dateTime) {
   };
   return date.toLocaleString("vi-VN", options).replace(",", "");
 }
+
 function formatCurrency(amount) {
   return (
     amount
-      .toLocaleString("vi-VN", { style: "currency", currency: "VND" })
-      .replace("₫", "")
-      .trim() + " đ"
+      .toLocaleString("vi-VN") // Định dạng số với dấu phẩy hàng nghìn
+      .trim() + " đ" // Thêm " đ" vào cuối
   );
 }
 
 app.get("/", (req, res) => {
-  const page = parseInt(req.query.page) || 1; // Lấy số trang từ query
-  const limit = 15;
-  const offset = (page - 1) * limit; // Tính offset dựa trên số trang
+  const page = parseInt(req.query.page) || 1;
+  const limit = 20;
+  const offset = (page - 1) * limit; // tính trang hiện tại
 
   const sql = `SELECT * FROM chuyenkhoan ORDER BY date_time DESC LIMIT ${limit} OFFSET ${offset}`;
 
-  // Truy vấn tổng số bản ghi để tính số trang
   db.query("SELECT COUNT(*) as total FROM chuyenkhoan", (err, result) => {
     if (err) {
       console.error("Lỗi: " + err);
-      return res.status(500).render("pages/home", { data: [] });
+      return res.status(500).render("pages/home", { data: [], stats: {}, currentPage: page, totalPages: 0 });
     }
 
-    const totalRecords = result[0].total; // Tổng số bản ghi
-    const totalPages = Math.ceil(totalRecords / limit); // Tổng số trang
+    const totalRecords = result[0].total; //tính ra tổng số bản ghi => 200347
+    const totalPages = Math.ceil(totalRecords / limit); 
 
     db.query(sql, (err, data) => {
       if (err) {
         console.error("Lỗi: " + err);
-        return res.status(500).render("pages/home", { data: [] });
+        return res.status(500).render("pages/home", { data: [], currentPage: page, totalPages, stats: {} });
       }
-
+      
       res.render("pages/home", {
         data: data || [],
         currentPage: page,
         totalPages: totalPages,
         formatDateTime,
         formatCurrency,
+        stats: {},
+        filters: {}
       });
     });
   });
 });
 
+app.get("/filters", (req, res) => {
+  const { startDate, endDate, minAmount, maxAmount, transactionDetail, page = 1 } = req.query;
+
+  let conditions = []; //nhận dk lọc
+  let values = [];//nhận values lọc
+  
+  //kiểm tra có cái nào thì nhận vào cái đó
+  if (startDate) {
+      conditions.push("date_time >= ?");
+      values.push(startDate);
+  }
+
+  if (endDate) {
+      conditions.push("date_time <= ?");
+      values.push(endDate);
+  }
+
+  if (minAmount) {
+      conditions.push("credit >= ?");
+      values.push(minAmount);
+  }
+
+  if (maxAmount) {
+      conditions.push("credit <= ?");
+      values.push(maxAmount);
+  }
+
+  if (transactionDetail) {
+      conditions.push("detail LIKE ?");
+      values.push(`%${transactionDetail}%`);
+  }
+
+  const baseSQL = "SELECT * FROM chuyenkhoan";
+  //countSQL get total giao dịch, total money
+  const countSQL = "SELECT COUNT(*) as total, SUM(credit) as totalAmount FROM chuyenkhoan" + (conditions.length ? ' WHERE ' + conditions.join(' AND ') : '');
+  
+  const limit = 20;
+  const offset = (page - 1) * limit;
+
+  const sql = baseSQL + (conditions.length ? ' WHERE ' + conditions.join(' AND ') : '') + ` ORDER BY date_time DESC LIMIT ${limit} OFFSET ${offset}`;
+
+  const startTime = Date.now();
+
+  db.query(countSQL, values, (err, countResult) => {
+      if (err) {
+          console.error("Lỗi: " + err);
+          return res.status(500).render("pages/home", { data: [], stats: {}, currentPage: page, totalPages: 0 });
+      }
+
+      const totalRecords = countResult[0].total;
+      const totalAmount = countResult[0].totalAmount || 0; 
+      const totalPages = Math.ceil(totalRecords / limit);//ceil: làm tròn số trang, ví dụ 6.25 thì lên
+
+      db.query(sql, values, (err, data) => {
+          if (err) {
+              console.error("Lỗi: " + err);
+              return res.status(500).render("pages/home", { data: [], stats: {}, currentPage: page, totalPages: 0 });
+          }
+
+          const endTime = Date.now();
+          const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+          res.render("pages/home", {
+              data: data || [],
+              currentPage: parseInt(page),
+              totalPages: totalPages,
+              formatDateTime,
+              formatCurrency,
+              stats: {
+                  totalAmount,
+                  transactionCount: totalRecords,
+                  duration
+              },
+              filters: {
+                  startDate,
+                  endDate,
+                  minAmount,
+                  maxAmount,
+                  transactionDetail,
+              }
+          });
+      });
+  });
+});
+
 app.post("/upload", upload.single("csvFile"), (req, res) => {
-  const results = [];
-  const batchSize = 5000;
+  let records = [];
+  const batchSize = 1000;
+
 
   fs.createReadStream(req.file.path)
     .pipe(csv())
@@ -102,24 +182,29 @@ app.post("/upload", upload.single("csvFile"), (req, res) => {
         const cleanedKey = key.replace(/['"]/g, "").trim();
         cleanedData[cleanedKey] = data[key];
       }
-      results.push(cleanedData);
+      records.push(cleanedData);
     })
     .on("end", async () => {
-      // Thay đổi để sử dụng async
-      console.log(`Length: ${results.length}`);
 
-      let batches = [];
-      const insertStartTime = Date.now();
+      // Kiểm tra xem các bản ghi đã tồn tại trong SQL hay chưa
+      const existingRecords = await checkExistingRecords(records);
 
-      // Hàm chèn dữ liệu vào SQL
-      const insertBatch = (batches) => {
+      if (existingRecords.length > 0) {
+        // Nếu đã tồn tại, chuyển hướng đến trang home với thông báo
+        return res.render("pages/home", {
+          message: "Có bản ghi đã tồn tại. Bạn có muốn ghi đè không?",
+          filePath: req.file.path, // Gửi đường dẫn file
+          filters: req.body.filters || {}, // Truyền filters nếu có
+        });
+      }
+      let listDatas = [];
+      const startTime = Date.now();
+
+      const insertBatch = (batch) => {
         return new Promise((resolve, reject) => {
-          const sql = `INSERT INTO chuyenkhoan (date_time, trans_no, credit, debit, detail) VALUES ${batches.join(
-            ", "
-          )}`;
+          const sql = `INSERT INTO chuyenkhoan (date_time, trans_no, credit, debit, detail) VALUES ${batch.join(", ")}`;
           db.query(sql, (err) => {
             if (err) {
-              console.error("Lỗi: " + err);
               reject(err);
             } else {
               resolve();
@@ -128,20 +213,15 @@ app.post("/upload", upload.single("csvFile"), (req, res) => {
         });
       };
 
-      // Duyệt qua từng hàng dữ liệu
-      for (const row of results) {
-        let dates = row["date_time"];
+      for (const record of records) {
+        let dates = record.date_time;
         let [datePart, timePart] = dates.split("_");
         let [day, month, year] = datePart.split("/");
         let formattedDate = `${year}-${month}-${day}`;
 
         let totalMinutes = Math.floor(parseFloat(timePart));
+        let totalSeconds = totalMinutes * 60 + Math.floor((parseFloat(timePart) % 1) * 60);
 
-        //lấy s bằng tổng minutes * 60 và + phần thập phân phía sau * 60
-        let totalSeconds =
-          totalMinutes * 60 + Math.floor((parseFloat(timePart) % 1) * 60);
-
-          //hàm chuyển thành chuỗi từ số //ex: 1 -> '01' hoặc 15 -> '15'
         const padNumber = (num) => String(num).padStart(2, "0");
 
         const formatTime = (totalSeconds) => {
@@ -151,48 +231,58 @@ app.post("/upload", upload.single("csvFile"), (req, res) => {
 
           const displayHours = hours % 24;
 
-          return `${padNumber(displayHours)}:${padNumber(minutes)}:${padNumber(
-            seconds
-          )}`;
+          return `${padNumber(displayHours)}:${padNumber(minutes)}:${padNumber(seconds)}`;
         };
 
         let formattedTime = formatTime(totalSeconds);
-        let date_time = `${formattedDate} ${formattedTime}`;
+        let dateTime = `${formattedDate} ${formattedTime}`;
+        const transNo = record.trans_no;
+        const credit = record.credit;
+        const debit = record.debit;
+        const detail = record.detail;
 
-        const trans_no = row.trans_no;
-        const credit = row.credit;
-        const debit = row.debit;
-        const detail = row.detail;
+        listDatas.push(`('${dateTime}', '${transNo}', '${credit}', '${debit}', '${detail}')`);
 
-        batches.push(
-          `('${date_time}', '${trans_no}', '${credit}', '${debit}', '${detail}')`
-        );
-
-        if (batches.length === batchSize) {
-          await insertBatch(batches); // Chờ cho đến khi chèn xong
-          batches.length = 0; // Reset batch
+        if (listDatas.length === batchSize) {
+          await insertBatch(listDatas);
+          listDatas = [];
         }
       }
 
-      // Chèn nếu còn lại dữ liệu trong batches
-      if (batches.length > 0) {
-        await insertBatch(batches); // Chờ cho đến khi chèn xong
+      if (listDatas.length > 0) {
+        await insertBatch(listDatas);
       }
 
-      const insertEndTime = Date.now();
-
-      //insertEndTime - insertStartTime -> mili giây và /1000 để chuyển sang giây
-      const insertTimeTaken = (
-        (insertEndTime - insertStartTime) /
-        1000
-      ).toFixed(2);
-
-      res.send(
-        `Dữ liệu đã được tải lên thành công. Thời gian chèn vào SQL: ${insertTimeTaken} giây.`
-      );
+      const endTime = Date.now();
+      const duration = ((endTime - startTime) / 1000).toFixed(2);
+      res.send(`Upload thành công. Tải lên SQL: ${duration} Giây.`);
     });
 });
 
+// Hàm kiểm tra bản ghi đã tồn tại
+async function checkExistingRecords(records) {
+  const existingRecords = [];
+
+  for (const record of records) {
+    const transNo = record.trans_no; //check 1 cột trans_no
+    const query = `SELECT * FROM chuyenkhoan WHERE trans_no = ?`;
+    
+    const result = await new Promise((resolve, reject) => {
+      db.query(query, [transNo], (err, results) => {
+        if (err) {
+          return reject(err);
+        }
+        resolve(results);
+      });
+    });
+
+    if (result.length > 0) {
+      existingRecords.push(transNo); // Thêm bản ghi đã tồn tại vào danh sách
+    }
+  }
+
+  return existingRecords;
+}
 app.listen(4001, () => {
   console.log("Server Started on http://localhost:4001");
 });

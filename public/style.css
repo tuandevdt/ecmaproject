@@ -14,6 +14,13 @@ footer {
 .my-4 {
     margin-bottom: 0 !important;
 }
+nav {
+    display: flex;
+    justify-content: center;
+}
+nav ul {
+    width: max-content;
+}
 
 .custom-form {
     background-color: white;
